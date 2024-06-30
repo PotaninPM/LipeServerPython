@@ -12,7 +12,7 @@ app = FastAPI()
 
 cred = credentials.Certificate("firebase_config.json")
 firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://lipe-5a30b-default-rtdb.firebaseio.com'
+    'databaseURL': 'link to db'
 })
 
 ref_users = db.reference('users')

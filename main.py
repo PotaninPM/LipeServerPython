@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import firebase_admin
 import asyncio
 import threading
+from typing import Dict, List
 from firebase_admin import credentials, db, messaging
 import math
 
@@ -12,7 +13,7 @@ app = FastAPI()
 
 cred = credentials.Certificate("firebase_config.json")
 firebase_admin.initialize_app(cred, {
-    'databaseURL': 'link to db'
+    'databaseURL': 'https://lipe-5a30b-default-rtdb.firebaseio.com'
 })
 
 ref_users = db.reference('users')
@@ -85,6 +86,72 @@ def send_notification_to_user(device_token: str, title: str, message: str, type:
     except Exception as e:
         print(f"Failed to send message to {device_token}: {str(e)}")
 
+class NewMessageChat(BaseModel):
+    senderUid: str
+    receiverUid: str
+    message: str
+
+class NewMessageGroup(BaseModel):
+    groupName: str
+    senderUid: str
+    users: List[str]
+    message: str
+
+@app.post("/new_message_chat")
+async def new_message_chat(new_message: NewMessageChat):
+    try:
+        ref_users = db.reference("users")
+        sender_data = ref_users.child(new_message.senderUid).get()
+        receiver_data = ref_users.child(new_message.receiverUid).get()
+
+        if not sender_data or not receiver_data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        sender_name = sender_data.get("username")
+        receiver_token = receiver_data.get("userToken")
+
+        if not receiver_token:
+            raise HTTPException(status_code=400, detail="Receiver has no notification token")
+
+        send_notification_to_user(
+            device_token=receiver_token,
+            title=f"Новое сообщение от {sender_name}",
+            message=new_message.message,
+            type="new_message_chat"
+        )
+
+        return {"status": "Notification sent"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+    
+@app.post("/new_message_group")
+async def new_message_group(new_message: NewMessageGroup):
+    try:
+        ref_users = db.reference("users")
+        sender_data = ref_users.child(new_message.senderUid).get()
+
+        if not sender_data:
+            raise HTTPException(status_code=404, detail="Sender not found")
+
+        sender_name = sender_data.get("username")
+        
+        for user_uid in new_message.users:
+            user_data = ref_users.child(user_uid).get()
+            if user_data and "userToken" in user_data:
+                receiver_token = user_data["userToken"]
+                send_notification_to_user(
+                    device_token=receiver_token,
+                    title=f"Сообщение группы {new_message.groupName}",
+                    message=f"{sender_name}: {new_message.message}",
+                    type="new_message_group"
+                )
+
+        return {"status": "Notifications sent"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+    
 @app.post("/query_to_friend")
 async def query_to_friend(request: FastAPIRequest):
     data = await request.json()

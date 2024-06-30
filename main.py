@@ -12,7 +12,7 @@ app = FastAPI()
 
 cred = credentials.Certificate("firebase_config.json")
 firebase_admin.initialize_app(cred, {
-    'databaseURL': 'url to firebase'
+    'databaseURL': 'https://lipe-5a30b-default-rtdb.firebaseio.com'
 })
 
 ref_users = db.reference('users')
@@ -132,10 +132,16 @@ async def create_ent_event(event: EventLocation):
                         if user_lat is not None and user_lon is not None:
                             distance = distance_between_coordinates(user_lat, user_lon, event.latitude, event.longitude)
                             if distance < 10.0:
-                                message = f"В {distance:.2f} километрах от вас создано новое событие!"
-                                print(f"Sending notification to user {user_key} with token {user_token}")
-                                send_notification_to_user(user_token, "Новое событие!", message, "new_event")
-                                notified_users.append(user_key)
+                                if(distance < 1.0):
+                                    message = f"В {distance * 1000} метрах от вас создано новое событие!"
+                                    print(f"Sending notification to user {user_key} with token {user_token}")
+                                    send_notification_to_user(user_token, "Новое событие!", message, "new_event")
+                                    notified_users.append(user_key)
+                                else:
+                                    message = f"В {distance:.2f} километрах от вас создано новое событие!"
+                                    print(f"Sending notification to user {user_key} with token {user_token}")
+                                    send_notification_to_user(user_token, "Новое событие!", message, "new_event")
+                                    notified_users.append(user_key)
 
         return {"status": "Event created", "notified_users": notified_users}
     except Exception as e:
@@ -173,19 +179,27 @@ async def get_points(points: Points):
         ref_users = db.reference("users")
         ref_rating = db.reference("rating")
 
-        for user_id in selected_users:
-            user_points_ref = ref_users.child(user_id).child("points")
-            rating_points_ref = ref_rating.child(user_id)
+        for user_uid in selected_users:
+            user_points_ref = ref_users.child(user_uid).child("points")
+            current_points = user_points_ref.get() or 0
+            new_points = current_points + points_int
+            user_points_ref.set(new_points)
 
-            user_points = user_points_ref.get() or 0
-            rating_points = rating_points_ref.get() or 0
-
-            user_points_ref.set(user_points + points_int)
-            rating_points_ref.set(rating_points + points_int)
+            user_data = ref_users.child(user_uid).get()
+            if user_data and "userToken" in user_data:
+                notification_token = user_data["userToken"]
+                send_notification_to_user(
+                    notification_token,
+                    "Новые баллы начислены",
+                    f"Вам начислены баллы, ваш новый рейтинг: {new_points}",
+                    "rating_update"
+                )
 
         return {"status": "Points awarded"}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error awarding points: {str(e)}")
+
     
 ref_rating.listen(update_rating)
 
